@@ -25,6 +25,38 @@ Parameters:
     Description: 'A GitHub personal access token with "repo" and "admin:repo_hook" permissions.'
 
 Resources:
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref AWS::StackName
+      ServiceRole: !GetAtt DeploymentRole.Arn 
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER 
+        ComputeType: BUILD_GENERAL1_SMALL 
+        Image: aws/codebuild/standard:2.0
+      Source:
+        Type: CODEPIPELINE
+
+  DeploymentApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Ref AWS::StackName 
+      ComputePlatform: Server     
+
+  StagingDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn: Instance
+    Properties:
+      DeploymentGroupName: staging
+      ApplicationName: !Ref DeploymentApplication 
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      ServiceRoleArn: !GetAtt DeploymentRole.Arn 
+      Ec2TagFilters:
+        - Key: aws:cloudformation:stack-name 
+          Type: KEY_AND_VALUE
+          Value: !Ref AWS::StackName 
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -77,45 +109,12 @@ Resources:
           Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/PowerUserAccess
-
-  BuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Ref AWS::StackName
-      ServiceRole: !GetAtt DeploymentRole.Arn 
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        Type: LINUX_CONTAINER 
-        ComputeType: BUILD_GENERAL1_SMALL 
-        Image: aws/codebuild/standard:2.0
-      Source:
-        Type: CODEPIPELINE
   
-  DeploymentApplication:
-    Type: AWS::CodeDeploy::Application
-    Properties:
-      ApplicationName: !Ref AWS::StackName 
-      ComputePlatform: Server
-
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles:
         - Ref: InstanceRole
-
-  StagingDeploymentGroup:
-    Type: AWS::CodeDeploy::DeploymentGroup
-    DependsOn: Instance
-    Properties:
-      DeploymentGroupName: staging
-      ApplicationName: !Ref DeploymentApplication 
-      DeploymentConfigName: CodeDeployDefault.AllAtOnce
-      ServiceRoleArn: !GetAtt DeploymentRole.Arn 
-      Ec2TagFilters:
-        - Key: aws:cloudformation:stack-name 
-          Type: KEY_AND_VALUE
-          Value: !Ref AWS::StackName
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -193,29 +192,29 @@ Resources:
     Type: AWS::EC2::Instance
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT15M
+        Timeout: PT5M
         Count: 1
     Metadata:
       AWS::CloudFormation::Init:
         config:
           packages:
             yum:
-              ruby: []
-          files:
-            /home/ec2-user/install:
+              ruby: [] 
+          files: 
+            /home/ec2-user/install: 
               source: !Sub "https://aws-codedeploy- ${AWS::Region}.s3.amazonaws.com/latest/install"
               mode: "000755" # executable
           commands:
-            00-install-cd-agent:
-              command: "./install auto"
+            00-install-cd-agent:  
+              command: "./install auto" 
               cwd: "/home/ec2-user/"
     Properties:
       ImageId: !Ref EC2AMI
-      InstanceType: !Ref EC2InstanceType
-      IamInstanceProfile: !Ref InstanceProfile
+      InstanceType: !Ref EC2InstanceType 
+      IamInstanceProfile: !Ref InstanceProfile 
       Monitoring: true
       SecurityGroupIds:
-        - !GetAtt SecurityGroup.GroupId
+        - !GetAtt SecurityGroup.GroupId 
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
@@ -229,9 +228,6 @@ Resources:
           # Get latest cfn scripts; https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/best-practices.html#cfninit
           yum install -y aws-cfn-bootstrap
 
-          # Have CloudFormation install any files and packages from the metadata
-          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} --resource Instance
-
           cat > /tmp/install_script.sh << EOF
             # START
             echo 'Setting up NodeJS Environment'
@@ -240,6 +236,7 @@ Resources:
             # Dot source the files to ensure that variables are available within the current shell
             . /home/ec2-user/.nvm/nvm.sh 
             . /home/ec2-user/.bashrc
+
             # Install NVM, NPM, Node.JS 
             nvm alias default v12.7.0 
             nvm install v12.7.0
@@ -247,15 +244,13 @@ Resources:
             
             # Create log directory
             mkdir -p /home/ec2-user/app/logs
-
-            # Run server
-            cd app
-            npm install
-            npm start
           EOF
 
           chown ec2-user:ec2-user /tmp/install_script.sh && chmod a+x /tmp/install_script.sh
           sleep 1; su - ec2-user -c '/tmp/install_script.sh'
+
+          # Have CloudFormation install any files and packages from the metadata
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} --resource Instance
 
           # Signal to CloudFormation that the instance is ready
           /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --region ${AWS::Region} --resource Instance
