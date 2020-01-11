@@ -12,7 +12,7 @@ phases:
     commands:
       - npm test
 
-      - npm run build 
+      - npm run build
 artifacts:
   files:
     - start-service.sh
